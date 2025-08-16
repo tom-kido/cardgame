@@ -266,3 +266,23 @@ body {
   opacity: .5;
   cursor: not-allowed;
 }
+/* Phaserキャンバスを手札エリアより前面にする */
+#phaser-root {
+  position: absolute;
+  inset: 0;
+  z-index: 4;           /* 手札(2)より上、UI(5)より下 */
+}
+
+/* 手札エリアはキャンバスより後ろに固定 */
+.hand-area {
+  z-index: 2;
+}
+
+/* 既存のUIはキャンバスより前に残す（既に z-index: 5 ならOK） */
+.info-panel,
+.turn-indicator,
+.deck-count,
+.message-log,
+.end-turn-btn {
+  z-index: 5; /* 既に設定済みなら変更不要 */
+}
