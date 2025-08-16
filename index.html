@@ -1,1 +1,466 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>2Dカードゲーム - v23 + Phaser（null安全版）</title>
+
+  <!-- Phaser -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+
+  <!-- 外部CSS（v23デザイン） -->
+  <link rel="stylesheet" href="https://tom-kido.github.io/cardgame/cardgame.css">
+</head>
+<body>
+  <div class="game-board">
+    <div class="background-pattern"></div>
+
+    <!-- Phaser が描画するキャンバス -->
+    <div id="phaser-root"></div>
+
+    <!-- ▼▼▼ v23 のDOM構造（見た目はCSSで制御） ▼▼▼ -->
+
+    <!-- プレイヤー1（下） -->
+    <div class="player1-area">
+      <!-- 山札 -->
+      <div class="deck-stack player1" id="deckStackP1">
+        <div class="deck-card deck-card-2 player1"></div>
+        <div class="deck-card deck-card-1 player1"></div>
+        <div class="deck-card deck-card-top player1 active" id="deckTopP1"><span>山札</span></div>
+      </div>
+
+      <!-- 場（5x2=10スロットをJSで生成） -->
+      <div class="field-area player1" id="fieldAreaP1"></div>
+
+      <!-- 右列（2スロット） -->
+      <div class="right-column player1" id="rightColumnP1">
+        <div class="right-slot" data-player="1" data-slot="0"></div>
+        <div class="right-slot" data-player="1" data-slot="1"></div>
+      </div>
+
+      <!-- 手札 -->
+      <div class="hand-area player1" id="handAreaP1">
+        <div class="hand-label">あなたの手札</div>
+        <div class="hand-cards"></div>
+      </div>
+    </div>
+
+    <!-- プレイヤー2（上／180度回転表示） -->
+    <div class="player2-area">
+      <!-- 山札（クリック不可の飾り） -->
+      <div class="deck-stack player2" id="deckStackP2">
+        <div class="deck-card deck-card-2 player2"></div>
+        <div class="deck-card deck-card-1 player2"></div>
+        <div class="deck-card deck-card-top player2"><span>CPU<br>山札</span></div>
+      </div>
+
+      <!-- 場（5x2=10スロットをJSで生成） -->
+      <div class="field-area player2" id="fieldAreaP2"></div>
+
+      <!-- 右列 -->
+      <div class="right-column player2" id="rightColumnP2">
+        <div class="right-slot" data-player="2" data-slot="0"></div>
+        <div class="right-slot" data-player="2" data-slot="1"></div>
+      </div>
+
+      <!-- 手札（表示だけ） -->
+      <div class="hand-area player2" id="handAreaP2">
+        <div class="hand-label">CPUの手札</div>
+        <div class="hand-cards"></div>
+      </div>
+    </div>
+
+    <!-- 共通UI -->
+    <div class="deck-count player1" id="deckCountP1">P1: 10枚</div>
+    <div class="deck-count player2" id="deckCountP2">CPU: 10枚</div>
+
+    <div class="info-panel">
+      <div style="font-size:18px;font-weight:bold;margin-bottom:5px;">2D カードゲーム</div>
+      <div style="font-size:14px;color:#cbd5e1;">プレイヤー vs CPU</div>
+    </div>
+
+    <div class="turn-indicator" id="turnIndicator">あなたのターン</div>
+    <button class="end-turn-btn" id="endTurnBtn">ターン終了</button>
+    <div class="message-log" id="messageLog">ゲーム開始！あなたのターンです。山札をクリックしてカードを引いてください</div>
+  </div>
+
+  <script>
+  // ========= 画像 =========
+  const CARD_BACK_URL  = 'https://scotief.files.show/card_back.png';
+  const CARD_FRONT_URL = 'https://scotief.files.show/card_front.png';
+
+  // ========= DOMユーティリティ（nullセーフ） =========
+  function getCenter(el) {
+    if (!el) return { x: 0, y: 0 };
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+  function centers(selector) {
+    return Array.from(document.querySelectorAll(selector)).map(getCenter);
+  }
+
+  // フィールドのスロットを生成（v23仕様：5x2=10）
+  function buildFieldSlots() {
+    const p1 = document.getElementById('fieldAreaP1');
+    const p2 = document.getElementById('fieldAreaP2');
+    if (p1) p1.innerHTML = '';
+    if (p2) p2.innerHTML = '';
+    for (let i = 0; i < 10; i++) {
+      const s1 = document.createElement('div');
+      s1.className = 'field-slot';
+      s1.dataset.player = '1';
+      s1.dataset.slot = String(i);
+      p1 && p1.appendChild(s1);
+
+      const s2 = document.createElement('div');
+      s2.className = 'field-slot';
+      s2.dataset.player = '2';
+      s2.dataset.slot = String(i);
+      p2 && p2.appendChild(s2);
+    }
+  }
+
+  // レイアウト計算（nullセーフ）
+  function computeLayout() {
+    return {
+      p1: {
+        hand: getCenter(document.getElementById('handAreaP1')),
+        fieldSlots: centers('#fieldAreaP1 .field-slot'),
+        rightSlots: centers('#rightColumnP1 .right-slot'),
+        deckTop: getCenter(document.getElementById('deckTopP1')),
+      },
+      p2: {
+        hand: getCenter(document.getElementById('handAreaP2')),
+        fieldSlots: centers('#fieldAreaP2 .field-slot'),
+        rightSlots: centers('#rightColumnP2 .right-slot'),
+      }
+    };
+  }
+
+  // 指定した要素群が揃うまで待つ（null.getBoundingClientRect対策）
+  function waitForLayoutReady() {
+    return new Promise(resolve => {
+      const ok = () =>
+        document.getElementById('deckTopP1') &&
+        document.getElementById('handAreaP1') &&
+        document.querySelectorAll('#fieldAreaP1 .field-slot').length === 10 &&
+        document.querySelectorAll('#fieldAreaP2 .field-slot').length === 10;
+
+      const tick = () => (ok() ? resolve() : setTimeout(tick, 50));
+      tick();
+    });
+  }
+
+  // ========= Phaser シーン =========
+  class CardGameScene extends Phaser.Scene {
+    constructor() { super('CardGame'); }
+
+    preload() {
+      this.load.image('cardBack',  CARD_BACK_URL);
+      this.load.image('cardFront', CARD_FRONT_URL);
+    }
+
+    async create() {
+      // まずスロットを組み立て → DOM構築完了を待つ
+      buildFieldSlots();
+      await waitForLayoutReady();
+
+      // レイアウト計算（以降も必要に応じて更新）
+      this.layout = computeLayout();
+
+      // ゲーム状態
+      this.snapRange = 40;
+      this.currentPlayer = 1;
+      this.players = {
+        1: { deck: this.shuffle([1,2,3,4,5,6,7,8,9,10]), hand: [], field: Array(10).fill(null), right: [[],[]] },
+        2: { deck: this.shuffle([1,2,3,4,5,6,7,8,9,10]), hand: [], field: Array(10).fill(null), right: [[],[]] }
+      };
+
+      // レイヤ
+      this.cardsLayer = this.add.layer();
+
+      // UIイベントは layout が取れてから紐づけ
+      const deckTopP1 = document.getElementById('deckTopP1');
+      deckTopP1 && deckTopP1.addEventListener('click', () => this.drawCard(1));
+      document.getElementById('endTurnBtn').addEventListener('click', () => this.endTurn());
+
+      // DND（dragX/dragY を使用）
+      this.input.on('dragstart', (pointer, sprite) => { this.children.bringToTop(sprite); });
+      this.input.on('drag',      (pointer, sprite, dragX, dragY) => { sprite.x = dragX; sprite.y = dragY; this.highlightNear(sprite); });
+      this.input.on('dragend',   (pointer, sprite) => { this.onDrop(sprite); });
+
+      // 初期UI
+      this.updateDeckDisplays();
+      this.message('ゲーム開始！あなたのターンです。山札をクリックしてカードを引いてください');
+      this.hideTurnIndicatorLater();
+
+      // リサイズでレイアウト取り直し
+      window.addEventListener('resize', () => {
+        this.layout = computeLayout();
+        this.layoutHands();
+        this.layoutBoard();
+      });
+
+      // 初期レイアウト
+      this.layoutHands();
+      this.layoutBoard();
+
+      // キーボードショートカット
+      document.addEventListener('keydown', (e) => {
+        if (this.currentPlayer !== 1) return;
+        if (e.code === 'Space')  { e.preventDefault(); this.drawCard(1); }
+        if (e.code === 'Enter')  { e.preventDefault(); this.endTurn(); }
+      });
+    }
+
+    shuffle(a){ const b=[...a]; for(let i=b.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [b[i],b[j]]=[b[j],b[i]]; } return b; }
+
+    // --- カード生成（山札の座標から出す） ---
+    createCard(number, owner) {
+      const deckPos = this.layout?.p1.deckTop || { x: 0, y: 0 };
+      const sprite = this.add.image(deckPos.x, deckPos.y, 'cardFront')
+        .setDisplaySize(80, 110)
+        .setInteractive({ draggable: true });
+      sprite.setData({ number, owner, source: 'hand', index: null, locked: false });
+      this.cardsLayer.add(sprite);
+      return sprite;
+    }
+
+    // --- ドロー（山札 → 手札） ---
+    drawCard(player) {
+      if (player !== this.currentPlayer && player === 1) { this.message('あなたのターンではありません'); return; }
+      const p = this.players[player];
+      if (!p || p.deck.length === 0) { this.message('山札にカードがありません'); return; }
+
+      const num = p.deck.shift();
+      const card = this.createCard(num, player);
+      p.hand.push(card);
+
+      const center = this.layout?.p1.hand || { x: 200, y: 500 };
+      const idx = p.hand.length - 1;
+      const tx = center.x + (idx - (p.hand.length-1)/2) * 20;
+      const ty = center.y;
+
+      this.tweens.add({ targets: card, x: tx, y: ty, duration: 400, ease: 'Power2' });
+      this.updateDeckDisplays();
+      this.message(`カード ${num} を手札に加えました`);
+    }
+
+    // --- 配置/スナップ（手札→場、場→右列） ---
+    onDrop(sprite) {
+      if (sprite.getData('owner') !== 1 || sprite.getData('locked')) { this.clearHighlights(); return; }
+
+      const source = sprite.getData('source');
+      const pt = { x: sprite.x, y: sprite.y };
+
+      if (source === 'hand') {
+        // 近い空きスロット（場）
+        const slots = Array.from(document.querySelectorAll('#fieldAreaP1 .field-slot'));
+        let best = { idx: -1, dist: Infinity, center: null };
+        slots.forEach((slot, idx) => {
+          const c = getCenter(slot);
+          const d = Phaser.Math.Distance.Between(pt.x, pt.y, c.x, c.y);
+          const occupied = !!this.cardsLayer.getChildren().find(o => o.name === `p1_field_${idx}`);
+          if (d <= this.snapRange && !occupied && d < best.dist) best = { idx, dist: d, center: c };
+        });
+        if (best.idx !== -1) {
+          // 手札から場へ
+          this.players[1].hand = this.players[1].hand.filter(s => s !== sprite);
+          this.players[1].field[best.idx] = sprite.getData('number');
+          sprite.setName(`p1_field_${best.idx}`);
+          sprite.setData('source', 'field');
+          sprite.setData('index', best.idx);
+          this.tweens.add({ targets: sprite, x: best.center.x, y: best.center.y, duration: 220, ease: 'Power2' });
+          document.querySelectorAll('#fieldAreaP1 .field-slot')[best.idx]?.classList.add('occupied');
+          this.layoutHands();
+          this.message(`カード ${sprite.getData('number')} を場へ配置`);
+          this.clearHighlights();
+          return;
+        }
+        // 戻す
+        this.returnToHand(sprite);
+        this.clearHighlights();
+        return;
+      }
+
+      if (source === 'field') {
+        // 右列へ移動（ロック）
+        const rslots = Array.from(document.querySelectorAll('#rightColumnP1 .right-slot'));
+        let best = { idx: -1, dist: Infinity, center: null };
+        rslots.forEach((slot, idx) => {
+          const c = getCenter(slot);
+          const d = Phaser.Math.Distance.Between(pt.x, pt.y, c.x, c.y);
+          if (d <= this.snapRange && d < best.dist) best = { idx, dist: d, center: c };
+        });
+        if (best.idx !== -1) {
+          const old = sprite.getData('index');
+          this.players[1].field[old] = null;
+          document.querySelectorAll('#fieldAreaP1 .field-slot')[old]?.classList.remove('occupied');
+          const stack = this.players[1].right[best.idx];
+          stack.push(sprite);
+          sprite.setName('');
+          sprite.setData('source', 'right');
+          sprite.setData('locked', true);
+          const offset = stack.length - 1;
+          this.tweens.add({ targets: sprite, x: best.center.x + offset*5, y: best.center.y + offset*20, duration: 220, ease: 'Power2' });
+          this.message(`カード ${sprite.getData('number')} を右列へ（ロック）`);
+          this.clearHighlights();
+          return;
+        }
+        // 元の場スロットへ戻す
+        const c = this.layout?.p1.fieldSlots[ sprite.getData('index') ];
+        if (c) this.tweens.add({ targets: sprite, x: c.x, y: c.y, duration: 220, ease: 'Power2' });
+        this.clearHighlights();
+      }
+    }
+
+    returnToHand(sprite) {
+      const arr = this.players[1].hand;
+      const center = this.layout?.p1.hand || { x: 200, y: 500 };
+      const idx = arr.indexOf(sprite);
+      const tx = center.x + (idx - (arr.length-1)/2) * 20;
+      const ty = center.y;
+      this.tweens.add({ targets: sprite, x: tx, y: ty, duration: 220, ease: 'Power2' });
+      this.message('カードを手札に戻しました');
+    }
+
+    highlightNear(sprite) {
+      this.clearHighlights();
+      const pt = { x: sprite.x, y: sprite.y };
+      const source = sprite.getData('source');
+
+      if (source === 'hand') {
+        // 手札→場のみ
+        document.querySelectorAll('#fieldAreaP1 .field-slot').forEach((slot, idx) => {
+          const c = getCenter(slot);
+          const d = Phaser.Math.Distance.Between(pt.x, pt.y, c.x, c.y);
+          const occupied = !!this.cardsLayer.getChildren().find(o => o.name === `p1_field_${idx}`);
+          if (d <= this.snapRange && !occupied) slot.classList.add('highlight');
+        });
+      } else if (source === 'field') {
+        // 場→右列のみ
+        document.querySelectorAll('#rightColumnP1 .right-slot').forEach(slot => {
+          const c = getCenter(slot);
+          const d = Phaser.Math.Distance.Between(pt.x, pt.y, c.x, c.y);
+          if (d <= this.snapRange) slot.classList.add('highlight');
+        });
+      }
+    }
+    clearHighlights() {
+      document.querySelectorAll('.field-slot.highlight,.right-slot.highlight')
+        .forEach(el => el.classList.remove('highlight'));
+    }
+
+    // --- レイアウト ---
+    layoutHands() {
+      const center = this.layout?.p1.hand; if (!center) return;
+      const arr = this.players[1].hand;
+      const overlap = 20;
+      arr.forEach((card, i) => {
+        const tx = center.x + (i - (arr.length-1)/2) * overlap;
+        const ty = center.y;
+        this.tweens.add({ targets: card, x: tx, y: ty, duration: 180, ease: 'Power2' });
+      });
+
+      const cpuCenter = this.layout?.p2.hand;
+      this.players[2].hand.forEach((card, i) => {
+        const tx = cpuCenter.x + (i - (this.players[2].hand.length-1)/2) * 10;
+        const ty = cpuCenter.y;
+        this.tweens.add({ targets: card, x: tx, y: ty, duration: 180, ease: 'Power2' });
+      });
+    }
+
+    layoutBoard() {
+      const p1Slots = this.layout?.p1.fieldSlots || [];
+      this.players[1].field.forEach((num, idx) => {
+        const c = this.cardsLayer.getChildren().find(o => o.name === `p1_field_${idx}`);
+        if (c && p1Slots[idx]) this.tweens.add({ targets: c, x: p1Slots[idx].x, y: p1Slots[idx].y, duration: 180, ease: 'Power2' });
+      });
+
+      const p2Slots = this.layout?.p2.fieldSlots || [];
+      this.players[2].field.forEach((num, idx) => {
+        const c = this.cardsLayer.getChildren().find(o => o.name === `p2_field_${idx}`);
+        if (c && p2Slots[idx]) this.tweens.add({ targets: c, x: p2Slots[idx].x, y: p2Slots[idx].y, duration: 180, ease: 'Power2' });
+      });
+
+      this.players[1].right.forEach((stack, sIdx) => {
+        const base = this.layout?.p1.rightSlots[sIdx];
+        stack.forEach((card, i) => { this.tweens.add({ targets: card, x: base.x + i*5, y: base.y + i*20, duration: 180, ease: 'Power2' }); });
+      });
+      this.players[2].right.forEach((stack, sIdx) => {
+        const base = this.layout?.p2.rightSlots[sIdx];
+        stack.forEach((card, i) => { this.tweens.add({ targets: card, x: base.x + i*5, y: base.y + i*20, duration: 180, ease: 'Power2' }); });
+      });
+    }
+
+    // --- CPU＆UI（簡易） ---
+    endTurn() {
+      this.currentPlayer = this.currentPlayer === 1 ? 2 : 1;
+      const ind = document.getElementById('turnIndicator');
+      const btn = document.getElementById('endTurnBtn');
+      if (this.currentPlayer === 1) {
+        ind.textContent = 'あなたのターン';
+        ind.style.background = 'linear-gradient(145deg, rgba(34,197,94,.9), rgba(22,163,74,.9))';
+        btn.disabled = false; this.message('あなたのターンです');
+      } else {
+        ind.textContent = 'CPUのターン';
+        ind.style.background = 'linear-gradient(145deg, rgba(239,68,68,.9), rgba(220,38,38,.9))';
+        btn.disabled = true; this.message('CPUのターンです');
+        this.cpuTurn();
+      }
+      ind.style.display = 'block'; this.hideTurnIndicatorLater();
+    }
+    cpuTurn() {
+      this.time.delayedCall(800,  () => { if (this.players[2].deck.length>0) this.drawCard(2); });
+      this.time.delayedCall(1600, () => { this.cpuPlayCard(); });
+      this.time.delayedCall(2400, () => { this.endTurn(); });
+    }
+    cpuPlayCard() {
+      const cpu = this.players[2];
+      if (cpu.hand.length === 0) return;
+      const empty = cpu.field.map((v,i)=>v===null?i:-1).filter(i=>i!==-1);
+      if (empty.length === 0) return;
+      const idxCard = Math.floor(Math.random()*cpu.hand.length);
+      const idxSlot = empty[Math.floor(Math.random()*empty.length)];
+      const card = cpu.hand.splice(idxCard,1)[0];
+      cpu.field[idxSlot] = card.getData('number');
+      card.setName(`p2_field_${idxSlot}`);
+      card.setData('owner',2);
+      card.setData('source','field');
+      card.setData('index', idxSlot);
+      card.setTexture('cardFront'); // 表示
+      const c = this.layout?.p2.fieldSlots[idxSlot];
+      if (c) this.tweens.add({ targets: card, x: c.x, y: c.y, duration: 220, ease: 'Power2' });
+      document.querySelector(`#fieldAreaP2 .field-slot[data-slot="${idxSlot}"]`)?.classList.add('occupied');
+      this.message(`CPUがカード ${card.getData('number')} を場に配置しました`);
+    }
+
+    updateDeckDisplays() {
+      document.getElementById('deckCountP1').textContent = `P1: ${this.players[1].deck.length}枚`;
+      document.getElementById('deckCountP2').textContent = `CPU: ${this.players[2].deck.length}枚`;
+      if (this.players[1].deck.length === 0) {
+        const ds = document.getElementById('deckStackP1');
+        const dt = document.getElementById('deckTopP1');
+        if (ds) ds.style.opacity = '.3';
+        if (dt) dt.style.pointerEvents = 'none';
+      }
+    }
+    message(msg){ const log=document.getElementById('messageLog'); if(!log) return; log.textContent=msg; log.style.opacity='0'; setTimeout(()=>{ log.style.transition='opacity .25s ease'; log.style.opacity='1'; }, 30); }
+    hideTurnIndicatorLater(){ setTimeout(()=>{ const el=document.getElementById('turnIndicator'); if(el) el.style.display='none'; }, 1800); }
+  }
+
+  // ========= Phaser 起動（キャンバスは透過でCSS背景をそのまま活かす） =========
+  const config = {
+    type: Phaser.AUTO,
+    parent: 'phaser-root',
+    width: window.innerWidth,
+    height: window.innerHeight,
+    backgroundColor: 'rgba(0,0,0,0)',
+    transparent: true,
+    scene: [CardGameScene],
+  };
+  new Phaser.Game(config);
+  </script>
+</body>
+</html>
 
