@@ -50,7 +50,8 @@
       <div class="deck-stack player2" id="deckStackP2">
         <div class="deck-card deck-card-2 player2"></div>
         <div class="deck-card deck-card-1 player2"></div>
-        <div class="deck-card deck-card-top player2"><span>CPU<br>山札</span></div>
+        <!-- CPUの山札トップに id を付与 -->
+        <div class="deck-card deck-card-top player2" id="deckTopP2"><span>CPU<br>山札</span></div>
       </div>
 
       <div class="field-area player2" id="fieldAreaP2"></div>
@@ -118,6 +119,9 @@
 
   // レイアウト計算（nullセーフ）
   function computeLayout() {
+    // CPU山札トップ要素（id が無い場合のフォールバックも用意）
+    const deckTopP2El = document.getElementById('deckTopP2')
+      || document.querySelector('.deck-stack.player2 .deck-card-top');
     return {
       p1: {
         hand: getCenter(document.getElementById('handAreaP1')),
@@ -129,6 +133,8 @@
         hand: getCenter(document.getElementById('handAreaP2')),
         fieldSlots: centers('#fieldAreaP2 .field-slot'),
         rightSlots: centers('#rightColumnP2 .right-slot'),
+        // CPU の山札座標を正しく参照
+        deckTop: getCenter(deckTopP2El),
       }
     };
   }
@@ -212,7 +218,10 @@
 
     // --- カード生成（画像+番号テキストをContainerに） ---
     createCard(number, owner) {
-      const deckPos = this.layout?.p1.deckTop || { x: 0, y: 0 };
+      // 生成位置：owner によって p1/p2 の山札座標を切り替える
+      const deckPos = owner === 1
+        ? (this.layout?.p1.deckTop || { x: 0, y: 0 })
+        : (this.layout?.p2.deckTop || { x: 0, y: 0 });
       const cont = this.add.container(deckPos.x, deckPos.y);
       const img  = this.add.image(0, 0, 'cardFront').setDisplaySize(80, 110);
       const txt  = this.add.text(0, 0, String(number), { fontFamily:'Segoe UI, sans-serif', fontSize:'28px', color:'#ffffff', fontStyle:'bold' }).setOrigin(0.5);
