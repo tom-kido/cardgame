@@ -10,7 +10,7 @@
 
   <!-- 外部CSS（v23デザイン） -->
   <link rel="stylesheet" href="https://tom-kido.github.io/cardgame/cardgame.css">
-  <!-- バージョン: 1.0 - パッチを適用するたびに、このバージョンを更新してください。 -->
+  <!-- バージョン: 1.1 - パッチを適用するたびに、このバージョンを更新してください。 -->
 </head>
 <body>
   <div class="game-board">
@@ -182,8 +182,8 @@
 
       // DnD
       this.input.on('dragstart', (pointer, obj) => {
-        // 右列はロック：ドラッグ開始させない
-        if (obj.getData && obj.getData('locked')) return;
+        // P1以外/ロックはドラッグ開始させない
+        if (obj.getData && (obj.getData('locked') || obj.getData('owner') !== 1)) return;
         this.children.bringToTop(obj);
       });
       this.input.on('drag', (pointer, obj, dragX, dragY) => {
@@ -223,19 +223,21 @@
         ? (this.layout?.p1.deckTop || { x: 0, y: 0 })
         : (this.layout?.p2.deckTop || { x: 0, y: 0 });
       const cont = this.add.container(deckPos.x, deckPos.y);
+      // ヒットエリアに使うサイズは先に設定しておく
+      cont.setSize(80,110);
       // P1の手札は表面＋番号、CPUの手札は裏面（番号非表示）
       if (owner === 1) {
         const img  = this.add.image(0, 0, 'cardFront').setDisplaySize(80, 110);
         const txt  = this.add.text(0, 0, String(number), { fontFamily:'Segoe UI, sans-serif', fontSize:'28px', color:'#ffffff', fontStyle:'bold' }).setOrigin(0.5);
         cont.add([img, txt]);
-        cont.setInteractive({ draggable:true });
+        // コンテナのヒットエリアを明示（サイズ依存）
+        cont.setInteractive(new Phaser.Geom.Rectangle(-40,-55,80,110), Phaser.Geom.Rectangle.Contains);
         this.input.setDraggable(cont);
       } else {
         const img  = this.add.image(0, 0, 'cardBack').setDisplaySize(80, 110);
         cont.add([img]);
         // CPUカードはユーザー操作不可（ドラッグ不可）
       }
-      cont.setSize(80,110);
       cont.setData({ number, owner, source: 'hand', index: null, locked: false });
       this.cardsLayer.add(cont);
       return cont;
