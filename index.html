@@ -10,6 +10,7 @@
 
   <!-- 外部CSS（v23デザイン） -->
   <link rel="stylesheet" href="https://tom-kido.github.io/cardgame/cardgame.css">
+  <!-- バージョン: 1.0 - パッチを適用するたびに、このバージョンを更新してください。 -->
 </head>
 <body>
   <div class="game-board">
@@ -218,16 +219,23 @@
 
     // --- カード生成（画像+番号テキストをContainerに） ---
     createCard(number, owner) {
-      // 生成位置：owner によって p1/p2 の山札座標を切り替える
       const deckPos = owner === 1
         ? (this.layout?.p1.deckTop || { x: 0, y: 0 })
         : (this.layout?.p2.deckTop || { x: 0, y: 0 });
       const cont = this.add.container(deckPos.x, deckPos.y);
-      const img  = this.add.image(0, 0, 'cardFront').setDisplaySize(80, 110);
-      const txt  = this.add.text(0, 0, String(number), { fontFamily:'Segoe UI, sans-serif', fontSize:'28px', color:'#ffffff', fontStyle:'bold' }).setOrigin(0.5);
-      cont.add([img, txt]);
-      cont.setSize(80,110).setInteractive({ draggable:true });
-      this.input.setDraggable(cont);
+      // P1の手札は表面＋番号、CPUの手札は裏面（番号非表示）
+      if (owner === 1) {
+        const img  = this.add.image(0, 0, 'cardFront').setDisplaySize(80, 110);
+        const txt  = this.add.text(0, 0, String(number), { fontFamily:'Segoe UI, sans-serif', fontSize:'28px', color:'#ffffff', fontStyle:'bold' }).setOrigin(0.5);
+        cont.add([img, txt]);
+        cont.setInteractive({ draggable:true });
+        this.input.setDraggable(cont);
+      } else {
+        const img  = this.add.image(0, 0, 'cardBack').setDisplaySize(80, 110);
+        cont.add([img]);
+        // CPUカードはユーザー操作不可（ドラッグ不可）
+      }
+      cont.setSize(80,110);
       cont.setData({ number, owner, source: 'hand', index: null, locked: false });
       this.cardsLayer.add(cont);
       return cont;
@@ -242,13 +250,18 @@
       const card = this.createCard(num, player);
       p.hand.push(card);
 
-      const center = this.layout?.p1.hand || { x: 200, y: 500 };
+      const center = (player === 1 ? this.layout?.p1.hand : this.layout?.p2.hand) || { x: 200, y: 500 };
       const idx = p.hand.length - 1;
-      const tx = center.x + (idx - (p.hand.length-1)/2) * 20;
+      const overlap = (player === 1 ? 20 : 10);
+      const tx = center.x + (idx - (p.hand.length-1)/2) * overlap;
       const ty = center.y;
       this.tweens.add({ targets: card, x: tx, y: ty, duration: 400, ease: 'Power2' });
       this.updateDeckDisplays();
-      this.message(`カード ${num} を手札に加えました`);
+      if (player === 1) {
+        this.message(`カード ${num} を手札に加えました`);
+      } else {
+        this.message('CPUがカードを引きました');
+      }
     }
 
     // --- ドロップ判定（手札→場、場→右列、場→場） ---
@@ -499,10 +512,16 @@
       document.getElementById('deckCountP1').textContent = `P1: ${this.players[1].deck.length}枚`;
       document.getElementById('deckCountP2').textContent = `CPU: ${this.players[2].deck.length}枚`;
       if (this.players[1].deck.length === 0) {
-        const ds = document.getElementById('deckStackP1');
-        const dt = document.getElementById('deckTopP1');
-        if (ds) ds.style.opacity = '.3';
-        if (dt) dt.style.pointerEvents = 'none';
+        const ds1 = document.getElementById('deckStackP1');
+        const dt1 = document.getElementById('deckTopP1');
+        if (ds1) ds1.style.opacity = '.3';
+        if (dt1) dt1.style.pointerEvents = 'none';
+      }
+      if (this.players[2].deck.length === 0) {
+        const ds2 = document.getElementById('deckStackP2');
+        const dt2 = document.getElementById('deckTopP2');
+        if (ds2) ds2.style.opacity = '.3';
+        if (dt2) dt2.style.pointerEvents = 'none';
       }
     }
     message(msg){ const log=document.getElementById('messageLog'); if(!log) return; log.textContent=msg; log.style.opacity='0'; setTimeout(()=>{ log.style.transition='opacity .25s ease'; log.style.opacity='1'; }, 30); }
