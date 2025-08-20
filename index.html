@@ -231,7 +231,7 @@
         const txt  = this.add.text(0, 0, String(number), { fontFamily:'Segoe UI, sans-serif', fontSize:'28px', color:'#ffffff', fontStyle:'bold' }).setOrigin(0.5);
         cont.add([img, txt]);
         // コンテナのヒットエリアを明示（サイズ依存）
-        cont.setInteractive(new Phaser.Geom.Rectangle(-40,-55,80,110), Phaser.Geom.Rectangle.Contains);
+        cont.setInteractive(new Phaser.Geom.Rectangle(0,0,80,110), Phaser.Geom.Rectangle.Contains);
         this.input.setDraggable(cont);
       } else {
         const img  = this.add.image(0, 0, 'cardBack').setDisplaySize(80, 110);
